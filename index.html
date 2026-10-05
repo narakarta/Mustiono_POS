@@ -582,12 +582,27 @@ function toast(msg, type) {
   document.getElementById('toast').appendChild(t);
   setTimeout(function(){ t.remove(); }, 3500);
 }
-function rp(n) { return (S.settings.currency || 'Rp') + ' ' + Math.round(Number(n) || 0).toLocaleString('id-ID'); }
+function ribuan(n) {
+  n = Math.round(Number(n) || 0);
+  var s = String(Math.abs(n)), out = '';
+  while (s.length > 3) { out = '.' + s.slice(-3) + out; s = s.slice(0, -3); }
+  return (n < 0 ? '-' : '') + s + out;
+}
+function rp(n) { return (S.settings.currency || 'Rp') + ' ' + ribuan(n); }
 function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-function fmtDate(iso) { var d = new Date(iso); return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}); }
+var BULAN = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+function p2(n) { return ('0' + n).slice(-2); }
+// Format manual (bukan toLocale*) agar hasil sama persis di semua browser/perangkat
+// dan aman untuk printer thermal yang hanya mengenal ASCII.
+function fmtDate(iso) {
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso || '');
+  return p2(d.getDate()) + ' ' + BULAN[d.getMonth()] + ' ' + d.getFullYear() + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
+function localDateStr(d) { d = d || new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
 function storeName(id) { var f = S.stores.filter(function(s){ return String(s.id) === String(id); }); return f.length ? f[0].name : (id || '-'); }
 function isSuper() { return S.user && S.user.role === 'superadmin'; }
-function todayStr() { return new Date().toISOString().substring(0,10); }
+function todayStr() { return localDateStr(new Date()); }
 
 /* ================= LOGIN ================= */
 document.getElementById('login-pass').addEventListener('keydown', function(e){ if (e.key === 'Enter') doLogin(); });
@@ -626,12 +641,12 @@ function enterApp() {
   var nonGudang = S.stores.filter(function(s){ return s.id !== 'ST-GUDANG' && Number(s.active) === 1; });
   var userStore = (S.user.storeId && S.user.storeId !== 'ST-GUDANG') ? S.user.storeId : '';
   if (isSuper()) {
-    // Super admin: bebas memilih & berpindah cabang
-    sel.innerHTML = nonGudang.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    // Super admin: bebas memilih & berpindah cabang, termasuk rekap semua cabang
+    sel.innerHTML = '<option value="">🏬 Semua Cabang</option>' + nonGudang.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
     S.storeId = userStore || (nonGudang[0] ? nonGudang[0].id : (S.stores[0] ? S.stores[0].id : ''));
     sel.value = S.storeId;
     sel.disabled = false;
-    sel.title = 'Pilih cabang aktif';
+    sel.title = 'Pilih cabang aktif — "Semua Cabang" untuk melihat gabungan semua cabang';
   } else {
     // Kasir: dikunci ke cabangnya sendiri, tidak bisa pindah cabang
     var assigned = nonGudang.filter(function(s){ return String(s.id) === String(userStore); });
@@ -695,11 +710,21 @@ function showPage(id) {
 
 function refreshCurrentPage() {
   if (S.page === 'dashboard') loadDashboard();
-  if (S.page === 'pos') { loadProducts(true); document.getElementById('pos-customer').value=''; }
+  if (S.page === 'pos') { ensureActiveStore(); loadProducts(true); document.getElementById('pos-customer').value=''; }
   if (S.page === 'products') { loadProducts(false); fillStoreFilters(); }
   if (S.page === 'reports') { initReportDates(); loadReports(); document.getElementById('btn-import').classList.toggle('hidden', !isSuper()); }
   if (S.page === 'receipt') renderReceiptSettings();
   if (S.page === 'accounts') { loadUsers(); loadStoresTable(); renderCompanyForm(); }
+}
+// "Semua Cabang" hanya untuk rekap; transaksi kasir wajib punya 1 cabang aktif.
+function ensureActiveStore() {
+  if (S.storeId) return;
+  var first = S.stores.filter(function(s){ return s.id !== 'ST-GUDANG' && Number(s.active) === 1; })[0];
+  if (!first) return;
+  S.storeId = first.id;
+  var sel = document.getElementById('store-select');
+  if (sel) sel.value = first.id;
+  toast('Transaksi kasir butuh cabang aktif — dipakai: ' + first.name, 'ok');
 }
 
 /* ================= DASHBOARD ================= */
@@ -712,8 +737,8 @@ function dashRange() {
     start = document.getElementById('dash-start').value;
     end = document.getElementById('dash-end').value || todayStr();
   } else if (r === 'today') start = todayStr();
-  else if (r === 'week') { var d = new Date(now.getTime() - 6*864e5); start = d.toISOString().substring(0,10); }
-  else if (r === 'month') start = now.getFullYear() + '-' + ('0'+(now.getMonth()+1)).slice(-2) + '-01';
+  else if (r === 'week') start = localDateStr(new Date(now.getTime() - 6*864e5));
+  else if (r === 'month') start = now.getFullYear() + '-' + p2(now.getMonth()+1) + '-01';
   return { start: start, end: end };
 }
 
@@ -781,7 +806,7 @@ function downloadRekap(mode) {
     if (mode === 'date') {
       var byDate = {};
       txs.forEach(function(t) {
-        var k = new Date(t.date).toISOString().substring(0,10);
+        var k = localDateStr(new Date(t.date));
         if (!byDate[k]) byDate[k] = { tanggal:k, jumlah_transaksi:0, total_penjualan:0, total_diskon:0 };
         byDate[k].jumlah_transaksi++;
         byDate[k].total_penjualan += Number(t.total);
@@ -791,7 +816,7 @@ function downloadRekap(mode) {
     } else {
       var byMonth = {};
       txs.forEach(function(t) {
-        var k = new Date(t.date).toISOString().substring(0,7);
+        var k = localDateStr(new Date(t.date)).substring(0,7);
         if (!byMonth[k]) byMonth[k] = { bulan:k, jumlah_transaksi:0, total_penjualan:0, total_diskon:0 };
         byMonth[k].jumlah_transaksi++;
         byMonth[k].total_penjualan += Number(t.total);
@@ -1469,11 +1494,22 @@ function openDirectPrint(tx, method) {
   if (!w) { toast('Popup diblokir browser — izinkan popup, atau pakai Dialog Print Browser.', 'err'); printViaBrowser(tx); }
 }
 /* Fungsi di bawah berjalan di jendela #print (top-level) */
+var ASCII_MAP = { '\u00a0':' ', '\u2013':'-', '\u2014':'-', '\u2018':"'", '\u2019':"'", '\u201c':'"', '\u201d':'"', '\u2026':'...', '\u2022':'*', '\u00b7':'-', '\u00d7':'x', '\u2212':'-', '\u2713':'v', '\u2605':'*', '\u2192':'>' };
+// Printer thermal hanya paham ASCII (CP437). Tanpa normalisasi ini, karakter
+// seperti spasi khusus/emoji berubah jadi "?" dan hasilnya beda antar perangkat.
+function toAscii(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/[^\x20-\x7E]/g, function(c) {
+    if (ASCII_MAP[c]) return ASCII_MAP[c];
+    var d = c.normalize ? c.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+    if (d && d.length === 1 && d.charCodeAt(0) < 128) return d;
+    return '?';
+  });
+}
 function buildEscposFromLines(lines, paper) {
   var cols = (paper === '58') ? 32 : 48;
   var out = [];
   function b() { for (var i = 0; i < arguments.length; i++) out.push(arguments[i] & 0xff); }
-  function str(s) { s = String(s); for (var i = 0; i < s.length; i++) { var cc = s.charCodeAt(i); out.push(cc > 127 ? 63 : (cc & 0xff)); } }
+  function str(s) { s = toAscii(s); for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 0x7f); }
   function nl() { b(0x0A); }
   function align(a) { b(0x1B, 0x61, a === 'c' ? 1 : (a === 'r' ? 2 : 0)); }
   function bold(on) { b(0x1B, 0x45, on ? 1 : 0); }
@@ -1549,31 +1585,39 @@ function notifyPrintDone() {
   setTimeout(function() { try { window.close(); } catch(e) {} }, 1200);
 }
 function sendChunked(ch, bytes) {
-  var i = 0, CHUNK = 180;
+  // write-with-response bisa dipecah otomatis oleh stack BLE (Write Long) → aman
+  // pakai chunk besar. write-without-response TIDAK: harus muat dalam 1 paket
+  // (MTU standar 23 byte = payload 20). HP Android sering pakai MTU kecil, jadi
+  // chunk 180 byte bikin nota terpotong/acak di HP padahal di desktop normal.
+  var reliable = !!(ch.properties && ch.properties.write);
+  var CHUNK = reliable ? 100 : 20;
+  var GAP = reliable ? 10 : 25;
+  var i = 0;
   function next() {
     if (i >= bytes.length) return Promise.resolve();
     var part = bytes.subarray(i, i + CHUNK); i += CHUNK;
-    var p = ch.properties && ch.properties.writeWithoutResponse
-      ? ch.writeValueWithoutResponse(part) : ch.writeValue(part);
-    return p.then(function() { return new Promise(function(r) { setTimeout(r, 20); }); }).then(next);
+    var p = reliable ? ch.writeValue(part) : ch.writeValueWithoutResponse(part);
+    return p.then(function() { return new Promise(function(r) { setTimeout(r, GAP); }); }).then(next);
   }
   return next();
 }
 function btFindWriteChar(services) {
-  var writeChar = null;
+  var writeChar = null, woChar = null;
   return services.reduce(function(chain, svc) {
     return chain.then(function() {
       return svc.getCharacteristics().then(function(chars) {
         chars.forEach(function(ch) {
-          if (writeChar) return;
           var p = ch.properties;
-          if (p && (p.write || p.writeWithoutResponse)) writeChar = ch;
+          if (!p) return;
+          if (p.write && !writeChar) writeChar = ch;      // diprioritaskan: ada ACK
+          else if (p.writeWithoutResponse && !woChar) woChar = ch;
         });
       });
     });
   }, Promise.resolve()).then(function() {
-    if (!writeChar) throw new Error('Printer tidak punya characteristic yang bisa ditulisi');
-    return writeChar;
+    var c = writeChar || woChar;
+    if (!c) throw new Error('Printer tidak punya characteristic yang bisa ditulisi');
+    return c;
   });
 }
 function btSend(dev, bytes) {
@@ -1726,7 +1770,7 @@ function loadTxReport() {
           (isSuper() ? '<button class="btn-outline btn-sm" onclick="editTx(\'' + t.id + '\')" title="Edit (super admin)">✏️</button> ' +
           '<button class="btn-danger btn-sm" onclick="deleteTx(\'' + t.id + '\',\'' + esc(t.invoice) + '\')" title="Hapus">🗑</button>' : '') +
         '</td></tr>';
-    }).join('') : '<tr><td colspan="10" class="muted center" style="padding:24px">Tidak ada transaksi pada rentang ini</td></tr>';
+    }).join('') : '<tr><td colspan="10" class="muted center" style="padding:24px">Tidak ada transaksi pada rentang ini.<br><span class="small">Periksa: (1) rentang tanggal di atas, (2) pilihan cabang di kanan atas — pilih "Semua Cabang" bila perlu, (3) tab <b>Transactions</b> di Google Sheet apakah barisnya benar-benar ada.</span></td></tr>';
     document.getElementById('rep-tx-tfoot').innerHTML = txs.length
       ? '<tr style="background:#f0f9ff"><td colspan="5"><b>TOTAL (' + txs.length + ' transaksi)</b></td><td></td><td class="right"><b>' + rp(disc) + '</b></td><td class="right" style="font-size:15px"><b>' + rp(sum) + '</b></td><td colspan="2"></td></tr>'
       : '';
@@ -1852,7 +1896,7 @@ function renderReceiptSettings() {
 }
 var PRINT_METHOD_HINTS = {
   browser: 'Nota dicetak lewat <b>dialog print browser</b>. Cara paling universal: mendukung printer thermal USB, jaringan/WiFi, PDF, dan <b>printer Bluetooth yang sudah di-pair ke HP/laptop</b> (di Android pilih printer Bluetooth pada daftar print). Tidak perlu izin khusus.',
-  bluetooth: 'Kirim perintah <b>ESC/POS langsung ke printer Bluetooth (BLE)</b> tanpa dialog print. Dibuka di jendela terpisah agar dapat izin Bluetooth. Catatan: hanya jalan di <b>Android/Chrome & desktop Chrome/Edge</b> (tidak didukung iPhone/iPad), dan khusus printer yang mendukung BLE. Printer Bluetooth lawas (SPP klasik) tidak terdeteksi — gunakan metode Dialog Print Browser. Logo tidak ikut tercetak pada mode langsung. <b>Perangkat terakhir disimpan</b>: cetak berikutnya langsung terkirim tanpa pilih ulang (tombol "Ganti printer" untuk mengganti perangkat).',
+  bluetooth: 'Kirim perintah <b>ESC/POS langsung ke printer Bluetooth (BLE)</b> tanpa dialog print. Dibuka di jendela terpisah agar dapat izin Bluetooth. Catatan: hanya jalan di <b>Android/Chrome & desktop Chrome/Edge</b> (tidak didukung iPhone/iPad), dan khusus printer yang mendukung BLE. Printer Bluetooth lawas (SPP klasik) tidak terdeteksi — gunakan metode Dialog Print Browser. Logo tidak ikut tercetak pada mode langsung. <b>Perangkat terakhir disimpan</b>: cetak berikutnya langsung terkirim tanpa pilih ulang (tombol "Ganti printer" untuk mengganti perangkat). <b>Hasil mode langsung = teks polos</b> (tanpa logo, lebar tetap 32 karakter untuk kertas 58mm / 48 karakter untuk 80mm), jadi wajar bila berbeda dengan hasil Dialog Print Browser. Bila popup cetak diblokir HP, aplikasi otomatis kembali ke dialog browser — inilah penyebab paling umum hasil cetak beda antar perangkat.',
   serial: 'Kirim perintah <b>ESC/POS langsung ke printer USB/Serial</b> lewat Web Serial. Hanya di <b>Chrome/Edge desktop</b>. Pilih baud rate yang sesuai printer (umumnya 9600). Logo tidak ikut tercetak pada mode langsung.'
 };
 function onPrintMethodChange() {
@@ -1984,7 +2028,7 @@ function openStoreForm(s) {
           loadStoresTable();
           var sel = document.getElementById('store-select');
           var cur = sel.value;
-          sel.innerHTML = S.stores.filter(function(x){ return x.id !== 'ST-GUDANG' && Number(x.active) === 1; }).map(function(x){ return '<option value="' + x.id + '">' + esc(x.name) + '</option>'; }).join('');
+          sel.innerHTML = (isSuper() ? '<option value="">🏬 Semua Cabang</option>' : '') + S.stores.filter(function(x){ return x.id !== 'ST-GUDANG' && Number(x.active) === 1; }).map(function(x){ return '<option value="' + x.id + '">' + esc(x.name) + '</option>'; }).join('');
           sel.value = cur;
         }).catch(function(e){ toast(e.message, 'err'); });
       }}
