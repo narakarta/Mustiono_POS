@@ -2098,7 +2098,7 @@ function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
       showLoading(false);
       if (data) {
         S.user = data.user; S.stores = data.stores; S.settings = data.settings;
-        enterApp();
+        enterApp(); 
       }
     })
     .catch(function(){ showLoading(false); });
