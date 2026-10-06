@@ -362,6 +362,34 @@ tr:hover td{background:#f8fafc}
         </div>
       </div>
 
+      <!-- ===== SETTING PRINTER ===== -->
+      <div class="page" id="page-printer">
+        <div class="row">
+          <div class="card col" style="max-width:560px">
+            <h3 style="font-size:15px;margin-bottom:14px">🖨️ Setting Printer per Cabang</h3>
+            <div class="form-grid">
+              <div class="full"><label>Cabang</label><select id="printer-store" onchange="loadPrinterSettings()"></select></div>
+              <div><label>Metode Printer</label>
+                <select id="pr-print_method" onchange="onPrinterMethodChange()">
+                  <option value="browser">Dialog Print Browser (semua printer)</option>
+                  <option value="bluetooth">Bluetooth langsung (ESC/POS)</option>
+                  <option value="serial">USB / Serial langsung (ESC/POS)</option>
+                </select>
+              </div>
+              <div><label>Ukuran Kertas</label>
+                <select id="pr-paper_width"><option value="80">80mm (standar)</option><option value="58">58mm (mini)</option></select>
+              </div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-primary" onclick="savePrinterSettings()">💾 Simpan Setting Printer</button>
+              <button class="btn-outline" onclick="printerTestPrint()">🖨️ Test Print</button>
+            </div>
+            <div id="printer-method-hint" class="muted small" style="margin-top:10px;line-height:1.5"></div>
+            <div class="muted small" style="margin-top:10px;line-height:1.5" id="printer-note"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== SETTING NOTA ===== -->
       <div class="page" id="page-receipt">
         <div class="row">
@@ -371,16 +399,6 @@ tr:hover td{background:#f8fafc}
               <div class="full"><label>Judul Nota</label><input id="st-receipt_title"></div>
               <div class="full"><label>Pesan Header (atas nota)</label><textarea id="st-receipt_header" rows="2"></textarea></div>
               <div class="full"><label>Pesan Footer (bawah nota)</label><textarea id="st-receipt_footer" rows="3"></textarea></div>
-              <div><label>Ukuran Kertas</label>
-                <select id="st-paper_width"><option value="80">80mm (standar)</option><option value="58">58mm (mini)</option></select>
-              </div>
-              <div><label>Metode Printer</label>
-                <select id="st-print_method" onchange="onPrintMethodChange()">
-                  <option value="browser">Dialog Print Browser (semua printer)</option>
-                  <option value="bluetooth">Bluetooth langsung (ESC/POS)</option>
-                  <option value="serial">USB / Serial langsung (ESC/POS)</option>
-                </select>
-              </div>
               <div><label>Tampilkan Logo</label>
                 <select id="st-show_logo"><option value="1">Ya</option><option value="0">Tidak</option></select>
               </div>
@@ -392,9 +410,8 @@ tr:hover td{background:#f8fafc}
             </div>
             <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn-primary" onclick="saveReceiptSettings()">💾 Simpan Setting Nota</button>
-              <button class="btn-outline" onclick="printTestReceipt()">🖨️ Test Print</button>
             </div>
-            <div id="print-method-hint" class="muted small" style="margin-top:10px;line-height:1.5"></div>
+            <div class="muted small" style="margin-top:10px;line-height:1.5">Pengaturan printer (metode &amp; ukuran kertas) ada di menu <b>🖨️ Setting Printer</b> dan tersimpan per cabang.</div>
           </div>
           <div class="card col">
             <h3 style="font-size:15px;margin-bottom:14px">👁️ Preview Nota</h3>
@@ -568,6 +585,14 @@ function call(action, payload) {
     throw err;
   });
 }
+// Ambil setting efektif (global + override cabang aktif) agar printer/nota
+// mengikuti cabang yang sedang dipilih.
+function loadEffectiveSettings() {
+  return call('settings.get', { storeId: S.storeId || '' }).then(function(st) {
+    S.settings = st;
+    return st;
+  }).catch(function(){});
+}
 var loadTimer = null;
 function showLoading(on) {
   var bar = document.getElementById('loading-bar');
@@ -661,10 +686,12 @@ function enterApp() {
   }
   var first = buildMenu();
   showPage(first || 'dashboard');
+  loadEffectiveSettings();
 }
 
 function onStoreChange() {
   S.storeId = document.getElementById('store-select').value;
+  loadEffectiveSettings();
   refreshCurrentPage();
 }
 
@@ -674,10 +701,11 @@ var MENUS = [
   { id:'pos',       icon:'🛒', label:'POS Kasir', roles:['superadmin','kasir'] },
   { id:'products',  icon:'📦', label:'Input Barang', roles:['superadmin','kepala'] },
   { id:'reports',   icon:'📄', label:'Laporan', roles:['superadmin','kepala'] },
-  { id:'receipt',   icon:'🧾', label:'Setting Nota & Printer', roles:['superadmin'] },
+  { id:'printer',   icon:'🖨️', label:'Setting Printer', roles:['superadmin','kepala'] },
+  { id:'receipt',   icon:'🧾', label:'Setting Nota', roles:['superadmin'] },
   { id:'accounts',  icon:'⚙️', label:'Setting Akun', roles:['superadmin'] }
 ];
-var PAGE_TITLES = { dashboard:'Dashboard', pos:'POS Kasir', products:'Input Barang', reports:'Laporan', receipt:'Setting Nota & Printer', accounts:'Setting Akun & Multi Cabang' };
+var PAGE_TITLES = { dashboard:'Dashboard', pos:'POS Kasir', products:'Input Barang', reports:'Laporan', printer:'Setting Printer', receipt:'Setting Nota', accounts:'Setting Akun & Multi Cabang' };
 
 function buildMenu() {
   var html = '';
@@ -714,6 +742,7 @@ function refreshCurrentPage() {
   if (S.page === 'products') { loadProducts(false); fillStoreFilters(); }
   if (S.page === 'reports') { initReportDates(); loadReports(); document.getElementById('btn-import').classList.toggle('hidden', !isSuper()); }
   if (S.page === 'receipt') renderReceiptSettings();
+  if (S.page === 'printer') { fillPrinterStoreSelect(); loadPrinterSettings(); }
   if (S.page === 'accounts') { loadUsers(); loadStoresTable(); renderCompanyForm(); }
 }
 // "Semua Cabang" hanya untuk rekap; transaksi kasir wajib punya 1 cabang aktif.
@@ -1885,13 +1914,12 @@ function exportReportCSV() {
 /* ================= SETTING NOTA ================= */
 function renderReceiptSettings() {
   var st = S.settings;
-  ['receipt_title','receipt_header','receipt_footer','paper_width','show_logo','invoice_prefix','print_method'].forEach(function(k) {
+  ['receipt_title','receipt_header','receipt_footer','show_logo','invoice_prefix'].forEach(function(k) {
     var el = document.getElementById('st-' + k);
-    if (el) el.value = st[k] !== undefined && st[k] !== '' ? st[k] : (k === 'print_method' ? 'browser' : '');
+    if (el) el.value = st[k] !== undefined ? st[k] : '';
   });
   var box = document.querySelector('#page-receipt #img-preview-box');
   if (box) box.innerHTML = st.logo ? '<img src="' + st.logo + '">' : '<span class="muted small">Belum ada logo</span>';
-  onPrintMethodChange();
   previewSampleReceipt();
 }
 var PRINT_METHOD_HINTS = {
@@ -1899,13 +1927,77 @@ var PRINT_METHOD_HINTS = {
   bluetooth: 'Kirim perintah <b>ESC/POS langsung ke printer Bluetooth (BLE)</b> tanpa dialog print. Dibuka di jendela terpisah agar dapat izin Bluetooth. Catatan: hanya jalan di <b>Android/Chrome & desktop Chrome/Edge</b> (tidak didukung iPhone/iPad), dan khusus printer yang mendukung BLE. Printer Bluetooth lawas (SPP klasik) tidak terdeteksi — gunakan metode Dialog Print Browser. Logo tidak ikut tercetak pada mode langsung. <b>Perangkat terakhir disimpan</b>: cetak berikutnya langsung terkirim tanpa pilih ulang (tombol "Ganti printer" untuk mengganti perangkat). <b>Hasil mode langsung = teks polos</b> (tanpa logo, lebar tetap 32 karakter untuk kertas 58mm / 48 karakter untuk 80mm), jadi wajar bila berbeda dengan hasil Dialog Print Browser. Bila popup cetak diblokir HP, aplikasi otomatis kembali ke dialog browser — inilah penyebab paling umum hasil cetak beda antar perangkat.',
   serial: 'Kirim perintah <b>ESC/POS langsung ke printer USB/Serial</b> lewat Web Serial. Hanya di <b>Chrome/Edge desktop</b>. Pilih baud rate yang sesuai printer (umumnya 9600). Logo tidak ikut tercetak pada mode langsung.'
 };
-function onPrintMethodChange() {
-  var el = document.getElementById('st-print_method');
-  var hint = document.getElementById('print-method-hint');
+/* ---- SETTING PRINTER (per cabang) ---- */
+function printerStores_() {
+  return S.stores.filter(function(s){ return s.id !== 'ST-GUDANG' && Number(s.active) === 1; });
+}
+function fillPrinterStoreSelect() {
+  var sel = document.getElementById('printer-store');
+  var list = printerStores_();
+  if (S.user.role !== 'superadmin') {
+    // Kepala toko: dikunci ke cabangnya sendiri
+    list = list.filter(function(s){ return String(s.id) === String(S.user.storeId); });
+  }
+  sel.innerHTML = list.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+  if (S.user.role !== 'superadmin') sel.disabled = true;
+  var note = document.getElementById('printer-note');
+  if (!list.length) {
+    note.textContent = 'Cabang belum ditetapkan untuk akun ini — hubungi Super Admin di menu Setting Akun.';
+  } else if (S.user.role !== 'superadmin') {
+    note.textContent = 'Pengaturan ini berlaku untuk cabang Anda saja dan tidak mempengaruhi cabang lain.';
+  } else {
+    note.textContent = 'Pengaturan tersimpan per cabang (mengganti bawaan global). Kosongkan pilihan cabang tidak tersedia di sini — gunakan menu Setting Nota untuk pengaturan global.';
+  }
+}
+function loadPrinterSettings() {
+  var sel = document.getElementById('printer-store');
+  if (!sel.options.length) return;
+  var storeId = sel.value;
+  call('settings.get', { storeId: storeId }).then(function(st) {
+    document.getElementById('pr-print_method').value = st.print_method || 'browser';
+    document.getElementById('pr-paper_width').value = st.paper_width || '80';
+    onPrinterMethodChange();
+  }).catch(function(e){ toast(e.message, 'err'); });
+}
+function onPrinterMethodChange() {
+  var el = document.getElementById('pr-print_method');
+  var hint = document.getElementById('printer-method-hint');
   if (hint && el) hint.innerHTML = PRINT_METHOD_HINTS[el.value] || PRINT_METHOD_HINTS.browser;
 }
+function savePrinterSettings() {
+  var storeId = document.getElementById('printer-store').value;
+  if (!storeId) return toast('Cabang belum dipilih', 'err');
+  var map = {
+    print_method: document.getElementById('pr-print_method').value,
+    paper_width: document.getElementById('pr-paper_width').value
+  };
+  call('settings.save', { map: map, storeId: storeId }).then(function() {
+    // Bila cabang yang disimpan = cabang aktif, terapkan segera
+    if (String(storeId) === String(S.storeId)) Object.assign(S.settings, map);
+    toast('Setting printer tersimpan ✓', 'ok');
+  }).catch(function(e){ toast(e.message, 'err'); });
+}
+function printerTestPrint() {
+  var storeId = document.getElementById('printer-store').value;
+  if (!storeId) return toast('Cabang belum dipilih', 'err');
+  var backup = S.settings;
+  S.settings = Object.assign({}, backup, {
+    print_method: document.getElementById('pr-print_method').value,
+    paper_width: document.getElementById('pr-paper_width').value
+  });
+  try {
+    printReceiptTx({
+      invoice: (S.settings.invoice_prefix || 'INV-Mr.C') + '-TEST', date: new Date().toISOString(), storeId: storeId,
+      userName: S.user.name, customer: 'TEST PRINTER', subtotal: 1000, discount: 0, total: 1000,
+      paid: 1000, change: 0, payment: 'TUNAI',
+      items: [{ name:'Test Print (contoh)', qty:1, price:1000 }]
+    });
+  } finally {
+    S.settings = backup;
+  }
+}
 function previewSampleReceipt() {
-  var keys = ['receipt_title','receipt_header','receipt_footer','paper_width','show_logo','invoice_prefix','print_method'];
+  var keys = ['receipt_title','receipt_header','receipt_footer','show_logo','invoice_prefix'];
   var tmp = {};
   keys.forEach(function(k) {
     var el = document.getElementById('st-' + k);
@@ -1937,7 +2029,7 @@ function uploadLogo(input) {
 }
 function saveReceiptSettings() {
   var map = {};
-  ['receipt_title','receipt_header','receipt_footer','paper_width','show_logo','invoice_prefix','print_method'].forEach(function(k) {
+  ['receipt_title','receipt_header','receipt_footer','show_logo','invoice_prefix'].forEach(function(k) {
     map[k] = document.getElementById('st-' + k).value;
   });
   if (S.settings.logo) map.logo = S.settings.logo;
@@ -2098,7 +2190,7 @@ function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
       showLoading(false);
       if (data) {
         S.user = data.user; S.stores = data.stores; S.settings = data.settings;
-        enterApp(); 
+        enterApp();
       }
     })
     .catch(function(){ showLoading(false); });
